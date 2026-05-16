@@ -516,9 +516,20 @@ select option{background:var(--bg3)}
 <div id="toast"></div>
 
 <!-- ══ FIREBASE + LOGIC ═══════════════════════════════════════ -->
-<script type="module">
-import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import{getDatabase,ref,onValue,set,remove,push,update}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+// Compat shims so rest of code works unchanged
+const initializeApp=firebase.initializeApp.bind(firebase);
+const getDatabase=app=>app.database();
+const ref=(db,path)=>db.ref(path);
+const onValue=(r,cb,opts)=>{ if(opts&&opts.onlyOnce){r.once("value",s=>cb(s));}else{r.on("value",s=>cb(s));} };
+const set=(r,v)=>r.set(v);
+const remove=r=>r.remove();
+const push=(r,v)=>{const nr=r.push();return nr.set(v).then(()=>nr);};
+const update=(r,v)=>r.update(v);
+</script>
+<script>
 
 const CONFIG_KEY="ptrak_v3_config";
 const THEME_KEY="ptrak_theme";
