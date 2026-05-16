@@ -559,34 +559,24 @@ const savedTheme=localStorage.getItem(THEME_KEY)||(window.matchMedia("(prefers-c
 applyTheme(savedTheme);
 
 // ── FIREBASE SETUP ─────────────────────────────────────────────
-window.connectFirebase=async function(){
+window.connectFirebase=function(){
   const raw=document.getElementById("config-input").value.trim();
-  const errEl=document.getElementById("setup-error");errEl.style.display="none";
+  const errEl=document.getElementById("setup-error");
+  errEl.style.display="none";
+  errEl.style.background="";errEl.style.color="";
   if(!raw){showSetupErr("Please paste your Firebase config JSON first.");return;}
   let cfg;
   try{cfg=JSON.parse(raw);}
-  catch(e){showSetupErr("Invalid JSON: "+e.message+". Make sure you copied the full { } block.");return;}
+  catch(e){showSetupErr("Invalid JSON: "+e.message);return;}
   if(!cfg.apiKey){showSetupErr("Missing apiKey in config.");return;}
-  if(!cfg.databaseURL){showSetupErr("Missing databaseURL. Add this line: "databaseURL": "https://my-portfolio-28da4-default-rtdb.firebaseio.com"");return;}
-  if(!cfg.projectId){showSetupErr("Missing projectId in config.");return;}
-  showSetupErr("Connecting...");
-  errEl.style.background="var(--teal-dim)";errEl.style.color="var(--teal)";errEl.style.display="block";
+  if(!cfg.databaseURL){showSetupErr("Missing databaseURL in config.");return;}
   try{
     const app=initializeApp(cfg);
     const db=getDatabase(app);
-    const testRef=ref(db,"_test");
-    // Test the connection actually works
-    await new Promise((resolve,reject)=>{
-      const timeout=setTimeout(()=>reject(new Error("Connection timed out — check your databaseURL is correct and database is created")),8000);
-      onValue(testRef,()=>{clearTimeout(timeout);resolve();},{onlyOnce:true});
-    });
     localStorage.setItem(CONFIG_KEY,JSON.stringify(cfg));
     launchApp(db,cfg.projectId||cfg.databaseURL);
   }
-  catch(e){
-    errEl.style.background="var(--red-dim)";errEl.style.color="var(--red)";
-    showSetupErr("Connection failed: "+e.message);
-  }
+  catch(e){showSetupErr("Firebase error: "+e.message);}
 };
 function showSetupErr(m){const e=document.getElementById("setup-error");e.textContent=m;e.style.display="block";}
 function launchApp(db,projectId){
