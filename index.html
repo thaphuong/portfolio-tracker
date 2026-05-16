@@ -576,35 +576,19 @@ function launchApp(db,projectId){
 window.disconnectFirebase=function(){localStorage.removeItem(CONFIG_KEY);location.reload();};
 
 // ── PRICES ─────────────────────────────────────────────────────
-// Free API keys — replace with your own if you hit rate limits
-const FINNHUB_KEY="d83vpn9r01qkm5c9nm10d83vpn9r01qkm5c9nm1g";
-const ALPHA_KEY="demo";
+const ALPHA_KEY="D8XKYB4T1CZPJOGU";
 
 async function fetchStockPrice(symbol){
-  // Try multiple free APIs in order
-  // 1. Try Finnhub
+  // Alpha Vantage — works from browser, no CORS issues
   try{
-    const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_KEY}`);
+    const r=await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${ALPHA_KEY}`);
     if(r.ok){
       const d=await r.json();
-      if(d.c&&d.c>0){
-        const change=d.dp||0;
-        return{price:d.c,change};
-      }
-    }
-  }catch(_){}
-  // 2. Try Yahoo Finance via a CORS proxy
-  try{
-    const r=await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`,{headers:{"Accept":"application/json"}});
-    if(r.ok){
-      const d=await r.json();
-      const res=d?.chart?.result?.[0];
-      if(res){
-        const closes=res.indicators?.quote?.[0]?.close||[];
-        const price=closes[closes.length-1];
-        const prev=closes[closes.length-2]||price;
-        const change=prev>0?((price-prev)/prev)*100:0;
-        if(price)return{price,change};
+      const q=d["Global Quote"];
+      if(q&&q["05. price"]){
+        const price=parseFloat(q["05. price"]);
+        const change=parseFloat(q["10. change percent"]?.replace("%",""))||0;
+        return{price,change};
       }
     }
   }catch(_){}
@@ -621,11 +605,13 @@ window.refreshPrices=async function(){
   const statusEl=document.getElementById("status-bar");
   statusEl.textContent="Fetching prices…";
 
-  // Fetch stocks one by one (Finnhub free tier)
+  // Fetch stocks one by one via Alpha Vantage
+  // Note: free tier = 25 requests/day, so we add a small delay between calls
   for(const h of stocks){
     const p=await fetchStockPrice(h.symbol);
     if(p)prices[h.symbol]=p;
-    else{statusEl.textContent=`Could not fetch price for ${h.symbol} — check symbol is correct`;}
+    else statusEl.textContent=`Could not fetch price for ${h.symbol}`;
+    if(stocks.length>1)await new Promise(r=>setTimeout(r,500));
   }
 
   // Fetch crypto via CoinGecko
