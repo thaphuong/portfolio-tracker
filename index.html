@@ -576,21 +576,84 @@ function launchApp(db,projectId){
 window.disconnectFirebase=function(){localStorage.removeItem(CONFIG_KEY);location.reload();};
 
 // ── PRICES ─────────────────────────────────────────────────────
+// Free API keys — replace with your own if you hit rate limits
+const FINNHUB_KEY="d0oj7bhr01qhup6v7vogd0oj7bhr01qhup6v7vp0"; // free public demo key
+const ALPHA_KEY="demo";
+
+async function fetchStockPrice(symbol){
+  // Try multiple free APIs in order
+  // 1. Try Finnhub
+  try{
+    const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_KEY}`);
+    if(r.ok){
+      const d=await r.json();
+      if(d.c&&d.c>0){
+        const change=d.dp||0;
+        return{price:d.c,change};
+      }
+    }
+  }catch(_){}
+  // 2. Try Yahoo Finance via a CORS proxy
+  try{
+    const r=await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`,{headers:{"Accept":"application/json"}});
+    if(r.ok){
+      const d=await r.json();
+      const res=d?.chart?.result?.[0];
+      if(res){
+        const closes=res.indicators?.quote?.[0]?.close||[];
+        const price=closes[closes.length-1];
+        const prev=closes[closes.length-2]||price;
+        const change=prev>0?((price-prev)/prev)*100:0;
+        if(price)return{price,change};
+      }
+    }
+  }catch(_){}
+  return null;
+}
+
 window.refreshPrices=async function(){
   const holdings=Object.values(window._holdings);if(!holdings.length)return;
   const btn=document.getElementById("refresh-btn");const icon=document.getElementById("refresh-icon");
   btn.disabled=true;icon.className="spin";icon.textContent="↻";
-  const stocks=holdings.filter(h=>h.type==="stock").map(h=>h.symbol);
-  const cryptos=holdings.filter(h=>h.type==="crypto").map(h=>h.symbol);
+  const stocks=holdings.filter(h=>h.type==="stock");
+  const cryptos=holdings.filter(h=>h.type==="crypto");
   const prices={};
-  if(stocks.length){try{const r=await fetch(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${stocks.join(",")}&fields=regularMarketPrice,regularMarketChangePercent`);if(r.ok){const d=await r.json();(d?.quoteResponse?.result||[]).forEach(q=>{prices[q.symbol]={price:q.regularMarketPrice,change:q.regularMarketChangePercent};});}}catch(_){}}
-  if(cryptos.length){const ids=cryptos.map(s=>CRYPTO_IDS[s.toUpperCase()]||s.toLowerCase()).join(",");try{const r=await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);if(r.ok){const d=await r.json();cryptos.forEach(sym=>{const k=CRYPTO_IDS[sym.toUpperCase()]||sym.toLowerCase();if(d[k])prices[sym.toUpperCase()]={price:d[k].usd,change:d[k].usd_24h_change};});}}catch(_){}}
-  window._prices=prices;renderAll();checkAlerts();
-  document.getElementById("status-bar").textContent=`Prices last updated ${new Date().toLocaleTimeString()}`;
+  const statusEl=document.getElementById("status-bar");
+  statusEl.textContent="Fetching prices…";
+
+  // Fetch stocks one by one (Finnhub free tier)
+  for(const h of stocks){
+    const p=await fetchStockPrice(h.symbol);
+    if(p)prices[h.symbol]=p;
+    else{statusEl.textContent=`Could not fetch price for ${h.symbol} — check symbol is correct`;}
+  }
+
+  // Fetch crypto via CoinGecko
+  if(cryptos.length){
+    const ids=cryptos.map(h=>CRYPTO_IDS[h.symbol.toUpperCase()]||h.symbol.toLowerCase()).join(",");
+    try{
+      const r=await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);
+      if(r.ok){
+        const d=await r.json();
+        cryptos.forEach(h=>{
+          const k=CRYPTO_IDS[h.symbol.toUpperCase()]||h.symbol.toLowerCase();
+          if(d[k])prices[h.symbol.toUpperCase()]={price:d[k].usd,change:d[k].usd_24h_change};
+        });
+      }
+    }catch(e){statusEl.textContent="Crypto price fetch failed: "+e.message;}
+  }
+
+  window._prices=prices;
+  const fetched=Object.keys(prices).length;
+  const total=holdings.length;
+  renderAll();checkAlerts();
+  statusEl.textContent=fetched>0
+    ?`${fetched}/${total} prices updated at ${new Date().toLocaleTimeString()}`
+    :"Could not fetch prices — check your internet connection";
   btn.disabled=false;icon.className="";icon.textContent="↻";
 };
 
-// ── PRICE HISTORY CHART (CoinGecko for crypto, Yahoo for stocks) ─
+// ── PRICE HISTORY CHART ────────────────────────────────────────
 async function fetchHistory(symbol,type,days=7){
   if(type==="crypto"){
     const id=CRYPTO_IDS[symbol.toUpperCase()]||symbol.toLowerCase();
@@ -599,12 +662,22 @@ async function fetchHistory(symbol,type,days=7){
       if(r.ok){const d=await r.json();return(d.prices||[]).map(([ts,p])=>({t:new Date(ts),p}));}
     }catch(_){}
   }else{
-    // Yahoo Finance chart
+    // Try Finnhub candles for stock history
     const now=Math.floor(Date.now()/1000);
-    const intervals={7:"1d",30:"1d",90:"1wk"};
-    const period1=now-(days*86400);
+    const from=now-(days*86400);
+    const res=days<=7?"D":days<=30?"D":"W";
     try{
-      const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${now}&interval=${intervals[days]||"1d"}`);
+      const r=await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${symbol}&resolution=${res}&from=${from}&to=${now}&token=${FINNHUB_KEY}`);
+      if(r.ok){
+        const d=await r.json();
+        if(d.s==="ok"&&d.t&&d.c){
+          return d.t.map((ts,i)=>({t:new Date(ts*1000),p:d.c[i]}));
+        }
+      }
+    }catch(_){}
+    // Fallback: Yahoo Finance chart v2
+    try{
+      const r=await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${days<=7?"1d":"1wk"}&range=${days<=7?"7d":days<=30?"1mo":"3mo"}`);
       if(r.ok){
         const d=await r.json();
         const ts=d?.chart?.result?.[0]?.timestamp||[];
