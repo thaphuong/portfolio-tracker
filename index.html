@@ -436,6 +436,10 @@ select option{background:var(--bg3)}
     </div>
 
     <div class="status-bar" id="status-bar"></div>
+<div id="debug-panel" style="display:none;margin-top:12px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);padding:12px;font-family:monospace;font-size:11px;color:var(--text2);white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto"></div>
+<div style="text-align:center;margin-top:10px">
+  <button class="btn" style="font-size:11px;padding:5px 12px" onclick="runDebug()">🔍 Debug prices</button>
+</div>
   </div>
 </div>
 
@@ -1017,6 +1021,42 @@ window.importData=async function(e){
   e.target.value="";
 };
 
+
+window.runDebug=async function(){
+  const panel=document.getElementById("debug-panel");
+  panel.style.display="block";
+  panel.textContent="Starting debug...
+";
+  const log=s=>{panel.textContent+=s+"
+";panel.scrollTop=panel.scrollHeight;};
+
+  log("Testing Alpha Vantage API...");
+  try{
+    const url=`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AMD&apikey=${ALPHA_KEY}`;
+    log("URL: "+url);
+    const r=await fetch(url);
+    log("Status: "+r.status+" "+r.statusText);
+    const text=await r.text();
+    log("Response: "+text.substring(0,300));
+    try{
+      const d=JSON.parse(text);
+      const q=d["Global Quote"];
+      if(q&&q["05. price"]){log("SUCCESS! AMD price: $"+q["05. price"]);}
+      else if(d["Note"]){log("API LIMIT reached: "+d["Note"]);}
+      else if(d["Information"]){log("API INFO: "+d["Information"]);}
+      else{log("No price data found. Keys: "+Object.keys(d).join(", "));}
+    }catch(e){log("JSON parse error: "+e.message);}
+  }catch(e){log("FETCH ERROR: "+e.message);}
+
+  log("
+Testing CoinGecko (crypto)...");
+  try{
+    const r=await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
+    log("Status: "+r.status);
+    const d=await r.json();
+    log("BTC price: $"+d?.bitcoin?.usd);
+  }catch(e){log("CoinGecko ERROR: "+e.message);}
+};
 
 window.installApp=function(){
   if(window._installPrompt){
